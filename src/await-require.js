@@ -1,4 +1,47 @@
 ;(function (global, document) {
+  const theOptions = {
+    getScript: (url, options = {}) => (
+      new Promise((resolve, reject) => {
+        let theUrl = url;
+        const { data = {}, header = {} } = options;
+        let { method } = options;
+        method = method ? method.toUpperCase() : 'GET';
+
+        const xhr = new XMLHttpRequest();
+        let formData;
+
+        if (method === 'GET') {
+          if (Object.keys(data).length > 0) {
+            const search = theUrl.match(/\?([^#]*)/)[1] || '';
+            const searchParams = new URLSearchParams(search);
+            Object.entries(data).forEach(([key, value]) => {
+              searchParams.append(key, value);
+            });
+            theUrl = `${theUrl}?${searchParams.toString()}`;
+          }
+        } else {
+          formData = new FormData();
+          Object.entries(data).forEach(([key, value]) => {
+            formData.append(key, value);
+          });
+        }
+        xhr.open(method, theUrl, true);
+        if (header) {
+          Object.entries(header).forEach(([key, value]) => {
+            xhr.setRequestHeader(key, value);
+          });
+        }
+        xhr.onload = (event) => {
+          resolve([event.currentTarget.responseText, event.currentTarget]);
+        }
+        xhr.onerror = (event) => {
+          reject([event.currentTarget]);
+        }
+        xhr.send(formData);
+      })
+    ),
+  };
+
   const domBody = document.getElementsByTagName('body')[0];
 
   const moduleList = {};
@@ -63,53 +106,6 @@
     return result.join('\n');
   };
 
-  const xhrPromise = (url, option = {}) => (
-    new Promise((resolve, reject) => {
-      let theUrl = url;
-      const {
-        data = {},
-        header = {},
-      } = option;
-      let {
-        method,
-      } = option;
-      method = method ? method.toUpperCase() : 'GET';
-
-      const xhr = new XMLHttpRequest();
-      let formData;
-
-      if (method === 'GET') {
-        if (Object.keys(data).length > 0) {
-          const search = theUrl.match(/\?([^#]*)/)[1] || '';
-          const searchParams = new URLSearchParams(search);
-          Object.entries(data).forEach(([key, value]) => {
-            searchParams.append(key, value);
-          });
-          theUrl = `${theUrl}?${searchParams.toString()}`;
-        }
-      } else {
-        formData = new FormData();
-        Object.entries(data).forEach(([key, value]) => {
-          formData.append(key, value);
-        });
-      }
-      xhr.open(method, theUrl, true);
-      if (header) {
-        Object.entries(header).forEach(([key, value]) => {
-          xhr.setRequestHeader(key, value);
-        });
-      }
-      xhr.onload = (event) => {
-        resolve([event.currentTarget.responseText, event.currentTarget]);
-      }
-      xhr.onerror = (event) => {
-        reject([event.currentTarget]);
-      }
-      xhr.send(formData);
-    })
-  );
-
-
   const requireFactory = (baseId) => ((relativeId) => {
     const id = path.resolve(path.dirname(baseId), relativeId);
     if (moduleList[id]) {
@@ -123,7 +119,7 @@
         exportsHandle = resolve;
       }),
       (async (id) => {
-        const [res] = await xhrPromise(id);
+        const [res] = await theOptions.getScript(id);
         const theScript = document.createElement('script');
         theScript.innerHTML = `\n;define('${id}',async function (require, module, exports) {\n${transImportToRequire(res)}\n});\n`;
         domBody.appendChild(theScript);
@@ -164,5 +160,17 @@
     module.exportsHandle(module.exports);
   };
 
-  global.awaitRequire = requireFactory(path.dirname(global.location.href.replace(global.location.origin, '')));
+  global.awaitRequire = (options = {}) => {
+    const globalPath = global.location.href.replace(global.location.origin, '');
+
+    let entry = [];
+    if (typeof (options.entry) === 'string') {
+      entry = [options.entry];
+    } else if (Array.isArray(options.entry)) {
+      entry = options.entry;
+    }
+    entry.forEach((id) => {
+      requireFactory(path.dirname(globalPath))(id);
+    });
+  };
 })(window, window.document);
