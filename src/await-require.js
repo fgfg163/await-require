@@ -54,11 +54,11 @@
       return line;
     });
     result.unshift(`"use strict"`);
+    if (hasExport) {
+      result.unshift(`Object.defineProperty(exports, "__esModule", {\n  value: true\n});`);
+    }
     if (hasImport) {
       result.unshift(`function _interopRequireDefault(obj) {\n  return obj && obj.__esModule ? obj : { default: obj };\n}`);
-    }
-    if (hasExport) {
-      result.push(`Object.defineProperty(exports, "__esModule", {\n  value: true\n});`);
     }
     return result.join('\n');
   };
@@ -118,33 +118,33 @@
 
     let exportsHandle;
 
-    const exportsPromiseHandle = new Promise((resolve) => {
-      exportsHandle = resolve;
+    const exportsPromise = Promise.all([
+      new Promise((resolve) => {
+        exportsHandle = resolve;
+      }),
+      (async (id) => {
+        const [res] = await xhrPromise(id);
+        const theScript = document.createElement('script');
+        theScript.innerHTML = `\n;define('${id}',async function (require, module, exports) {\n${transImportToRequire(res)}\n});\n`;
+        domBody.appendChild(theScript);
+      })(id),
+    ]).then(([res]) => {
+      moduleHandle.state = 'resolve';
+      return res;
+    }).catch((err) => {
+      moduleHandle.state = 'reject';
+      console.error(err);
     });
 
     const moduleHandle = {
       id,
       state: 'pending',
       exportsHandle,
-      exports: Promise.all([
-        exportsPromiseHandle,
-        (async (id) => {
-          const [res] = await xhrPromise(id);
-          const theScript = document.createElement('script');
-          theScript.innerHTML = `\n;define('${id}',async function (require, module, exports) {\n${transImportToRequire(res)}\n});\n`;
-          domBody.appendChild(theScript);
-        })(id),
-      ]).then(([res]) => {
-        moduleHandle.state = 'resolve';
-        return res;
-      }).catch((err) => {
-        moduleHandle.state = 'reject';
-        console.error(err);
-      }),
+      exports: {},
     };
 
     moduleList[id] = moduleHandle;
-    return moduleList[id].exports;
+    return exportsPromise;
   });
 
 
@@ -153,9 +153,7 @@
     if (typeof (mod) !== 'function') {
       throw TypeError('Module must be a async function or return a promise');
     }
-    const module = {
-      exports: {},
-    };
+    const module = moduleList[id];
     const require = requireFactory(id);
     const moduleHandle = mod(require, module, module.exports);
     if (typeof (moduleHandle) !== 'object' || typeof (moduleHandle.then) !== 'function') {
@@ -163,8 +161,7 @@
     }
     await moduleHandle;
 
-    moduleList[id].exports = Promise.resolve(module.exports);
-    moduleList[id].exportsHandle(module.exports);
+    module.exportsHandle(module.exports);
   };
 
   global.awaitRequire = requireFactory(path.dirname(global.location.href.replace(global.location.origin, '')));

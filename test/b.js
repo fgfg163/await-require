@@ -1,5 +1,4 @@
-import c from './c.js';
+import a from './a.js';
 console.log('this b.js')
-export const a = 'param from b.js';
-export const b = 'param from b.js';
+console.log(a);
 export default 'param from b.js';
