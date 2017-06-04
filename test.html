@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <title>Title</title>
-  <script src="/lib/babel.min.js"></script>
 </head>
 <body>
-  <script src="/src/await-require.js"></script>
+  this is body
+  <script src="http://cdn.bootcss.com/babel-standalone/6.24.2/babel.js"></script>
   <script>
-    awaitRequire({ entry: '/test/a.js' });
+    console.log(awaitRequire);
+    console.log(Babel);
   </script>
 </body>
 </html>
