@@ -6,10 +6,10 @@
 </head>
 <body>
   this is body
-  <script src="http://cdn.bootcss.com/babel-standalone/6.24.2/babel.js"></script>
+  <script src="/lib/babel.min.js"></script>
+  <script src="/src/await-require.js"></script>
   <script>
-    console.log(awaitRequire);
-    console.log(Babel);
+    window.awaitRequire('/test/a.js');
   </script>
 </body>
 </html>

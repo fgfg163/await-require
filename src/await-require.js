@@ -1,6 +1,6 @@
 ;(function (global, document) {
   const theOptions = {
-    getScript: (url, options = {}) => (
+    getRes: (url, options = {}) => (
       new Promise((resolve, reject) => {
         let theUrl = url;
         const { data = {}, header = {} } = options;
@@ -42,6 +42,16 @@
     ),
   };
 
+  var Base64 = {
+    encode: function (str) {
+      return window.btoa(unescape(encodeURIComponent(str)));
+    },
+    decode: function (str) {
+      return decodeURIComponent(escape(window.atob(str)));
+    }
+  };
+  window.Base64 = Base64;
+
   const domBody = document.getElementsByTagName('body')[0];
 
   const moduleList = {};
@@ -74,36 +84,14 @@
     },
   };
 
-  const transImportToRequire = (text) => {
-    let hasImport = false;
-    let hasExport = false;
-    const result = text.split('\n').map((line) => {
-      const trimLine = line.trim();
-      if (trimLine.slice(0, 6) === 'import') {
-        hasImport = true;
-        let newLine = trimLine
-          .replace(/^import\s+?/, 'const ')
-          .replace(/from\s*?("|')(.*)("|')/, '= require($1$2$3)')
-          .replace(/require\(("|')(.*)("|')\);?/, '_interopRequireDefault(await require($1$2$3));');
-        return newLine
-      } else if (trimLine.slice(0, 6) === 'export') {
-        hasExport = true;
-        let newLine = trimLine
-          .replace(/^export\s+?default/, 'module.exports.default = ')
-          .replace(/^export\s+?(?:const|let|var)\s+?([^\s]*) \s*= /, 'module.exports.$1 = ')
-          .replace(/^export\s+?function\s+?([^\s]*)/, 'module.exports.$1 = function')
-        return newLine
-      }
-      return line;
+  const transCode = ({ filename, code }) => {
+    const babelObj = Babel.transform(code, {
+      presets: ['react'],
+      plugins: ['transform-es2015-modules-commonjs'],
+      sourceMaps: true,
+      filename,
     });
-    result.unshift(`"use strict"`);
-    if (hasExport) {
-      result.unshift(`Object.defineProperty(exports, "__esModule", {\n  value: true\n});`);
-    }
-    if (hasImport) {
-      result.unshift(`function _interopRequireDefault(obj) {\n  return obj && obj.__esModule ? obj : { default: obj };\n}`);
-    }
-    return result.join('\n');
+    return babelObj;
   };
 
   const requireFactory = (baseId) => ((relativeId) => {
@@ -119,9 +107,18 @@
         exportsHandle = resolve;
       }),
       (async (id) => {
-        const [res] = await theOptions.getScript(id);
+        const [res] = await theOptions.getRes(id);
         const theScript = document.createElement('script');
-        theScript.innerHTML = `\n;define('${id}',async function (require, module, exports) {\n${transImportToRequire(res)}\n});\n`;
+
+        const babelObj = transCode({
+          filename: id,
+          code: res
+        });
+
+        const theSourceMapStr = '//# sourceMappingURL=data:application/json;charset=utf-8;base64,' + Base64.encode(JSON.stringify(babelObj.map));
+        const theCode = babelObj.code.replace('require(', 'await require(');
+        theScript.innerHTML = `\n;define('${id}',async function (require, module, exports) {\n${theCode}\n});\n\n${theSourceMapStr}\n`;
+
         domBody.appendChild(theScript);
       })(id),
     ]).then(([res]) => {
@@ -164,7 +161,9 @@
     const globalPath = global.location.href.replace(global.location.origin, '');
 
     let entry = [];
-    if (typeof (options.entry) === 'string') {
+    if (typeof (options) === 'string') {
+      entry = [options];
+    } else if (typeof (options.entry) === 'string') {
       entry = [options.entry];
     } else if (Array.isArray(options.entry)) {
       entry = options.entry;

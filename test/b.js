@@ -1,4 +1,4 @@
-import a from './a.js';
+// import a from './a.js';
 console.log('this b.js')
-console.log(a);
+// console.log(a);
 export default 'param from b.js';
