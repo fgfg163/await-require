@@ -114,7 +114,7 @@
           filename: id,
           code: res
         });
-
+        console.log(babelObj);
         const theSourceMapStr = '//# sourceMappingURL=data:application/json;charset=utf-8;base64,' + Base64.encode(JSON.stringify(babelObj.map));
         const theCode = babelObj.code.replace('require(', 'await require(');
         theScript.innerHTML = `\n;define('${id}',async function (require, module, exports) {\n${theCode}\n});\n\n${theSourceMapStr}\n`;
