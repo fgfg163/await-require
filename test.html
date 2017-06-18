@@ -6,10 +6,20 @@
 </head>
 <body>
   this is body
-  <script src="/lib/babel.min.js"></script>
+  <script src="/lib/babel.js"></script>
+  <script src="/src/babel-await-require-plugin.js"></script>
   <script src="/src/await-require.js"></script>
   <script>
-    window.awaitRequire('/test/a.js');
+    window.awaitRequire({
+      entry: '/test/a.js',
+      basePath: '/',
+      modules: [
+        "node_modules",
+      ],
+      alias: {
+        "jquery": "jquery/dist/jquery.js",
+      },
+    });
   </script>
 </body>
 </html>

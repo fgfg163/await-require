@@ -1,5 +1,7 @@
 ;(function (global, document) {
   const theOptions = {
+    alias: {},
+    modules: ['node_modules'],
     getRes: (url, options = {}) => (
       new Promise((resolve, reject) => {
         let theUrl = url;
@@ -32,7 +34,11 @@
           });
         }
         xhr.onload = (event) => {
-          resolve([event.currentTarget.responseText, event.currentTarget]);
+          if (event.currentTarget.status === 200) {
+            resolve([event.currentTarget.responseText, event.currentTarget]);
+          } else {
+            reject([event.currentTarget]);
+          }
         }
         xhr.onerror = (event) => {
           reject([event.currentTarget]);
@@ -77,6 +83,38 @@
             }
           });
         });
+      if (param && param[param.length - 1]) {
+        if (param[param.length - 1].slice(-1) === '/') {
+          thePathArr.push('');
+        }
+      }
+      return thePathArr.join('/');
+    },
+    join: (...param) => {
+      let thePathArr = [];
+      if (param[0] && param[0].slice(0, 1) === '/') {
+        thePathArr = [''];
+      }
+      param.filter(e => (typeof (e) === 'string' && !!e))
+        .forEach((element) => {
+          element.split('/').filter(e => !!e).forEach((ePath) => {
+            const lastPath = thePathArr[thePathArr.length - 1];
+            if (!lastPath || lastPath === '.' || lastPath === '..') {
+              thePathArr.push(ePath);
+            } else if (ePath === '.') {
+              // nothing
+            } else if (ePath === '..') {
+              thePathArr.pop();
+            } else {
+              thePathArr.push(ePath);
+            }
+          });
+        });
+      if (param && param[param.length - 1]) {
+        if (param[param.length - 1].slice(-1) === '/') {
+          thePathArr.push('');
+        }
+      }
       return thePathArr.join('/');
     },
     dirname: (param = '') => {
@@ -87,15 +125,21 @@
   const transCode = ({ filename, code }) => {
     const babelObj = Babel.transform(code, {
       presets: ['react'],
-      plugins: ['transform-es2015-modules-commonjs'],
+      plugins: ['transform-es2015-modules-commonjs', 'await-require-plugin'],
       sourceMaps: true,
       filename,
     });
     return babelObj;
   };
 
-  const requireFactory = (baseId) => ((relativeId) => {
-    const id = path.resolve(path.dirname(baseId), relativeId);
+  const requireFactory = (baseId) => ((relativeId = '') => {
+    let id = path.join(path.dirname(baseId), relativeId);
+    let noTrance = false;
+    if (/^[^\/^.]/.test(relativeId) && theOptions.alias[relativeId]) {
+      id = path.join('/', theOptions.modules[0], theOptions.alias[relativeId]);
+      noTrance = true;
+    }
+
     if (moduleList[id]) {
       return moduleList[id].exports;
     }
@@ -109,15 +153,18 @@
       (async (id) => {
         const [res] = await theOptions.getRes(id);
         const theScript = document.createElement('script');
+        if (!noTrance) {
+          const babelObj = transCode({
+            filename: id,
+            code: res
+          });
 
-        const babelObj = transCode({
-          filename: id,
-          code: res
-        });
-        console.log(babelObj);
-        const theSourceMapStr = '//# sourceMappingURL=data:application/json;charset=utf-8;base64,' + Base64.encode(JSON.stringify(babelObj.map));
-        const theCode = babelObj.code.replace('require(', 'await require(');
-        theScript.innerHTML = `\n;define('${id}',async function (require, module, exports) {\n${theCode}\n});\n\n${theSourceMapStr}\n`;
+          const theSourceMapStr = '//# sourceMappingURL=data:application/json;charset=utf-8;base64,' + Base64.encode(JSON.stringify(babelObj.map));
+          const theCode = babelObj.code;
+          theScript.innerHTML = `\n;define('${id}',async function (require, module, exports) {\n${theCode}\n});\n\n${theSourceMapStr}\n`;
+        } else {
+          theScript.innerHTML = `\n;define('${id}',async function (require, module, exports) {\n${res}\n});\n`;
+        }
 
         domBody.appendChild(theScript);
       })(id),
@@ -168,8 +215,24 @@
     } else if (Array.isArray(options.entry)) {
       entry = options.entry;
     }
+    let basePath = '';
+    if (typeof (options) === 'object') {
+      if (typeof ( options.basePath) === 'string') {
+        basePath = options.basePath;
+      }
+      if (typeof ( options.alias) === 'object') {
+        theOptions.alias = options.alias;
+      }
+      if (typeof (options.modules) === 'string') {
+        theOptions.modules = [options.modules];
+      } else if (Array.isArray(options.modules)) {
+        theOptions.modules = options.modules;
+      }
+    }
+
+    const jsBasePath = path.resolve(globalPath, basePath);
     entry.forEach((id) => {
-      requireFactory(path.dirname(globalPath))(id);
+      requireFactory(path.dirname(jsBasePath))(id);
     });
   };
 })(window, window.document);
