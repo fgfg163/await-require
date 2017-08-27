@@ -1,6 +1,7 @@
 ;(function (global, document) {
   const theOptions = {
     alias: {},
+    extensions: ['.js'],
     modules: ['node_modules'],
     getRes: (url, options = {}) => (
       new Promise((resolve, reject) => {
@@ -28,6 +29,10 @@
           });
         }
         xhr.open(method, theUrl, true);
+        if (options.noCache) {
+          xhr.setRequestHeader('If-Modified-Since', '0');
+          xhr.setRequestHeader('Cache-Control', 'no-cache');
+        }
         if (header) {
           Object.entries(header).forEach(([key, value]) => {
             xhr.setRequestHeader(key, value);
@@ -46,9 +51,47 @@
         xhr.send(formData);
       })
     ),
+    getResWithExtensions: async (url, ...param) => {
+      // 如果url不是点或斜杠开头的，说明这是一个node_modules中的文件
+      if (/^[^\/^.]/.test(url) && theOptions.alias[url]) {
+        if (typeof (theOptions.alias[url]) === 'string') {
+          if (/^~\//.test(theOptions.alias[url])) {
+            const aliasUrl = theOptions.alias[url].replace(/^~\//, '');
+            try {
+              for (const val of theOptions.modules) {
+                const newUrl = path.join('/', val, aliasUrl);
+                return await theOptions.getRes(newUrl, ...param);
+              }
+            } catch (err) {
+            }
+          } else {
+            try {
+              const newUrl = path.join('/', theOptions.alias[url]);
+              return await theOptions.getRes(newUrl, ...param);
+            } catch (err) {
+            }
+          }
+        }
+        return;
+      }
+      // 如果url是点或斜杠开头的，说明这是一个普通文件
+      let theExtensions = theOptions.extensions;
+      // 如果url没有后缀名，extensions 长度大于1，extensions 第一位是空格，则将空格移到第二位，优化查询优先级
+      if (!/\.[^.^/]*$/.test(url) && theExtensions.length > 1 && theExtensions[0] === '') {
+        [theExtensions[1], theExtensions[0]] = [...theExtensions];
+      }
+      for (const val of theExtensions) {
+        // 按顺序遍历相应后缀
+        try {
+          return await theOptions.getRes(`${url}${val}`, ...param);
+        } catch (err) {
+        }
+
+      }
+    },
   };
 
-  var Base64 = {
+  const Base64 = {
     encode: function (str) {
       return window.btoa(unescape(encodeURIComponent(str)));
     },
@@ -118,13 +161,14 @@
       return thePathArr.join('/');
     },
     dirname: (param = '') => {
-      return param.match(/^.*\//)[0] || '/';
+      const result = param.match(/^.*\//) || [];
+      return result[0] || '/';
     },
   };
 
   const transCode = ({ filename, code }) => {
     const babelObj = Babel.transform(code, {
-      presets: ['react'],
+      presets: ['stage-2', 'react'],
       plugins: ['transform-es2015-modules-commonjs', 'await-require-plugin'],
       sourceMaps: true,
       filename,
@@ -136,8 +180,12 @@
     let id = path.join(path.dirname(baseId), relativeId);
     let noTrance = false;
     if (/^[^\/^.]/.test(relativeId) && theOptions.alias[relativeId]) {
-      id = path.join('/', theOptions.modules[0], theOptions.alias[relativeId]);
-      noTrance = true;
+      if (typeof (theOptions.alias[relativeId]) === 'string') {
+        id = relativeId;
+        noTrance = true;
+      } else {
+        return theOptions.alias[relativeId];
+      }
     }
 
     if (moduleList[id]) {
@@ -151,21 +199,36 @@
         exportsHandle = resolve;
       }),
       (async (id) => {
-        const [res] = await theOptions.getRes(id);
         const theScript = document.createElement('script');
-        if (!noTrance) {
-          const babelObj = transCode({
-            filename: id,
-            code: res
-          });
+        let theCacheFile = '';
+        let theCacheTime = 0;
+        if (localStorage) {
+          theCacheFile = localStorage.getItem(`await-require/cachefile/${id}`);
+          theCacheTime = localStorage.getItem(`await-require/cachetime/${id}`);
+        }
+        const [res, xhr] = await theOptions.getResWithExtensions(id);
+        const serverLastModified = xhr.getResponseHeader('Last-Modified');
+        if (serverLastModified && theCacheTime !== String(new Date(serverLastModified).getTime())) {
+          if (!noTrance) {
+            const babelObj = transCode({
+              filename: id,
+              code: res
+            });
 
-          const theSourceMapStr = '//# sourceMappingURL=data:application/json;charset=utf-8;base64,' + Base64.encode(JSON.stringify(babelObj.map));
-          const theCode = babelObj.code;
-          theScript.innerHTML = `\n;define('${id}',async function (require, module, exports) {\n${theCode}\n});\n\n${theSourceMapStr}\n`;
-        } else {
-          theScript.innerHTML = `\n;define('${id}',async function (require, module, exports) {\n${res}\n});\n`;
+            const theSourceMapStr = '//# sourceMappingURL=data:application/json;charset=utf-8;base64,' + Base64.encode(JSON.stringify(babelObj.map));
+            const theCode = babelObj.code;
+            theCacheFile = `\n;define('${id}',async function (require, module, exports) {\n${theCode}\n});\n\n${theSourceMapStr}\n`;
+          } else {
+            theCacheFile = `\n;define('${id}',async function (require, module, exports) {\n${res}\n});\n`;
+          }
+
+          if (localStorage) {
+            localStorage.setItem(`await-require/cachefile/${id}`, theCacheFile);
+            localStorage.setItem(`await-require/cachetime/${id}`, String(new Date(serverLastModified).getTime()));
+          }
         }
 
+        theScript.innerHTML = theCacheFile;
         domBody.appendChild(theScript);
       })(id),
     ]).then(([res]) => {
@@ -173,7 +236,9 @@
       return res;
     }).catch((err) => {
       moduleHandle.state = 'reject';
-      console.error(err);
+      setTimeout(() => {
+        throw err;
+      }, 0);
     });
 
     const moduleHandle = {
@@ -227,6 +292,11 @@
         theOptions.modules = [options.modules];
       } else if (Array.isArray(options.modules)) {
         theOptions.modules = options.modules;
+      }
+      if (typeof (options.extensions) === 'string') {
+        theOptions.extensions = [options.extensions];
+      } else if (Array.isArray(options.extensions)) {
+        theOptions.extensions = [...new Set(['', ...options.extensions])];
       }
     }
 
